@@ -39,6 +39,24 @@ def heuristic(pos1, pos2):
     """Manhattan distance heuristic."""
     return abs(pos1.x - pos1.y) + abs(pos2.x - pos2.y)
 
+def get_top_halite_positions(game_map):
+    """Get the top 5 positions with the highest halite values."""
+    halite_positions = []
+
+    for y in range(game_map.height):
+        for x in range(game_map.width):
+            position = Position(x, y)
+            halite_amount = game_map[position].halite_amount
+            halite_positions.append((halite_amount, position))
+
+    # Sort positions by halite amount in descending order
+    halite_positions.sort(key=lambda item: item[0], reverse=True)
+
+    # Get the top 5 halite positions
+    top_halite_positions = halite_positions[:5]
+
+    return top_halite_positions
+
 def a_star(game_map, source, target):
     """A* pathfinding to navigate from source to target."""
     open_set = [source]
@@ -84,6 +102,9 @@ while True:
     game.update_frame()
     me = game.me
     game_map = game.game_map
+
+    top_halite_positions = get_top_halite_positions(game_map)
+    logging.info(f"Top 5 Halite Positions: {top_halite_positions}")
 
     command_queue = []
 
