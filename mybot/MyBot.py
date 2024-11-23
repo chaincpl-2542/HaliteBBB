@@ -1,48 +1,84 @@
 #!/usr/bin/env python3
 # Python 3.6
 
-# Import the Halite SDK, which will let you interact with the game.
-import hlt
-from enum import Enum
 import math
+import random
+import logging
+from enum import Enum
 
-# This library contains constant values.
+# Import the Halite SDK
+import hlt
 from hlt import constants
-
-# This library contains direction metadata to better interface with the game.
 from hlt.positionals import Direction, Position
 
-# This library allows you to generate random numbers.
-import random
-
-# Logging allows you to save messages for yourself. This is required because the regular STDOUT
-#   (print statements) are reserved for the engine-bot communication.
-import logging
-
 """ <<<Game Begin>>> """
-
-# This game object contains the initial game state.
 game = hlt.Game()
-# At this point "game" variable is populated with initial map data.
-# This is a good place to do computationally expensive start-up pre-processing.
-# As soon as you call "ready" function below, the 2 second per turn timer will start.
-game.ready("BBB (BigBrainBot)")
+game.ready("BBB")
 
-# Now that your bot is initialized, save a message to yourself in the log file with some important information.
-#   Here, you log here your id, which you can always fetch from the game object by using my_id.
-logging.info("Successfully created bot! My Player ID is {}.".format(game.my_id))
+logging.info(f"Successfully created bot! My Player ID is {game.my_id}.")
 
-""" <<<Game Loop>>> """
 class BotState(Enum):
     SEARCH = 1
     MOVE_TO_TARGET = 2
     COLLECTING = 3
     BACK_TO_HOME = 4
-    
-target = None
-home = Position(0,0)
-state = BotState.SEARCH
-distance = 1
+
+""" <<<Game Loop>>> """
+ship_stage = {}
+
+# Utility Functions
+def get_neighbors(position):
+    """Returns valid neighboring positions."""
+    directions = [Direction.North, Direction.South, Direction.East, Direction.West]
+    neighbors = []
+    for direction in directions:
+        neighbors.append(position.directional_offset(direction))
+    return neighbors
+
+def heuristic(pos1, pos2):
+    """Manhattan distance heuristic."""
+    return abs(pos1.x - pos1.y) + abs(pos2.x - pos2.y)
+
+def a_star(game_map, source, target):
+    """A* pathfinding to navigate from source to target."""
+    open_set = [source]
+    closed_set = set()
+    came_from = {}
+
+    gScore = {source: 0}
+    fScore = {source: heuristic(source, target)}
+
+    while open_set:
+        current = min(open_set, key=lambda pos: fScore.get(pos, float('inf')))
+
+        if current == target:
+            # Reconstruct path
+            path = []
+            while current in came_from:
+                path.insert(0, current)
+                current = came_from[current]
+            return path  # Return the path to follow
+
+        open_set.remove(current)
+        closed_set.add(current)
+
+        for neighbor in get_neighbors(current):
+            if neighbor in closed_set or game_map[neighbor].is_occupied:
+                continue
+
+            tentative_gScore = gScore[current] + game_map[neighbor].halite_amount / 10  # Example cost
+
+            if neighbor not in open_set:
+                open_set.append(neighbor)
+
+            if tentative_gScore >= gScore.get(neighbor, float('inf')):
+                continue
+
+            came_from[neighbor] = current
+            gScore[neighbor] = tentative_gScore
+            fScore[neighbor] = gScore[neighbor] + heuristic(neighbor, target)
+
+    return []  # No path found
 
 while True:
     game.update_frame()
@@ -50,53 +86,53 @@ while True:
     game_map = game.game_map
 
     command_queue = []
-    surrounding_vectors = []
-    
-    for ship in me.get_ships():
-        if state == BotState.SEARCH:
-            halite_value = []
-            for x_offset in range(-distance, distance + 1):
-                for y_offset in range(-distance, distance + 1):
-                    if abs(x_offset) + abs(y_offset) == distance or (abs(x_offset) == distance and abs(y_offset) == distance):
-                        surrounding_vectors.append((ship.position.x + x_offset, ship.position.y + y_offset))
-                        
-            print(len(surrounding_vectors))
-            for vector in surrounding_vectors:
-                
-                halite_value[vector] = game_map[vector].halite_amount
-                print(vector + " : " + halite_value[vector])
-            
-            if target != None:
-                state = BotState.MOVE_TO_TARGET
-                
-        elif state == BotState.MOVE_TO_TARGET:
-            
-            if game_map[ship.position].halite_amount < constants.MAX_HALITE / 10 or ship.is_full:
-                    
-                d = Position(0,0)
-                d.x = target.x - ship.position.x
-                d.y = target.y - ship.position.y
-                
-                cmd = Direction.Still
-                
-                if d.x > 0:
-                    cmd = Direction.East
-                if  d.x < 0:
-                    cmd = Direction.West
-                if d.y > 0:
-                    cmd = Direction.South
-                if  d.y < 0:
-                    cmd = Direction.North
-                    
-                command_queue.append(ship.move(cmd))
-                
-            else:
-                
-                if target == None:
-                    state = BotState.SEARCH
 
-    if game.turn_number <= 200 and me.halite_amount >= constants.SHIP_COST and not game_map[me.shipyard].is_occupied:
+    for ship in me.get_ships():
+        if ship.id not in ship_stage:
+            ship_stage[ship.id] = BotState.MOVE_TO_TARGET
+
+        if ship_stage[ship.id] == BotState.MOVE_TO_TARGET:
+            # Look for the best halite nearby
+            halite_values = {}
+            direction_values = {}
+            for direction in [Direction.North, Direction.South, Direction.East, Direction.West]:
+                pos = ship.position.directional_offset(direction)
+                if not game_map[pos].is_occupied:
+                    halite_values[pos] = game_map[pos].halite_amount
+                    direction_values[pos] = direction
+
+            # Move towards the place with the highest halite
+            if halite_values:
+                highest_halite_pos = max(halite_values, key=halite_values.get)
+                direction = direction_values[highest_halite_pos]
+                game_map[ship.position.directional_offset(direction)].mark_unsafe(ship)
+                command_queue.append(ship.move(direction))
+            else:
+                command_queue.append(ship.stay_still())
+
+            ship_stage[ship.id] = BotState.COLLECTING
+
+        elif ship_stage[ship.id] == BotState.COLLECTING:
+            command_queue.append(ship.stay_still())
+            if ship.halite_amount >= constants.MAX_HALITE or game_map[ship.position].halite_amount < 20:
+                ship_stage[ship.id] = BotState.BACK_TO_HOME if ship.halite_amount >= constants.MAX_HALITE else BotState.MOVE_TO_TARGET
+
+        elif ship_stage[ship.id] == BotState.BACK_TO_HOME:
+            # Use A* to navigate back to the shipyard
+            path = a_star(game_map, ship.position, me.shipyard.position)
+            if path:
+                next_position = path[0]
+                direction = game_map.get_unsafe_moves(ship.position, next_position)[0]
+                game_map[ship.position.directional_offset(direction)].mark_unsafe(ship)
+                command_queue.append(ship.move(direction))
+            else:
+                command_queue.append(ship.stay_still())
+
+            if ship.position == me.shipyard.position:
+                ship_stage[ship.id] = BotState.MOVE_TO_TARGET
+
+    # Spawn ships if appropriate
+    if game.turn_number <= constants.MAX_TURNS - 50 and me.halite_amount >= constants.SHIP_COST and not game_map[me.shipyard].is_occupied:
         command_queue.append(me.shipyard.spawn())
 
     game.end_turn(command_queue)
-
