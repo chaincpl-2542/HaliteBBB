@@ -39,6 +39,20 @@ def get_neighbors(position):
         neighbors.append(position.directional_offset(direction))
     return neighbors
 
+def calculate_team_halite(game):
+    """Calculate the total halite for each team."""
+    team_halite = {}
+
+    for player_id, player in game.players.items():
+        total_halite = player.halite_amount 
+
+        for ship in player.get_ships():
+            total_halite += ship.halite_amount
+
+        team_halite[player_id] = total_halite
+
+    return team_halite
+
 def heuristic(pos1, pos2):
     """Manhattan distance heuristic."""
     return abs(pos1.x - pos2.x) + abs(pos1.y - pos2.y)
@@ -47,7 +61,7 @@ def get_opponent_shipyards(game):
     """Find all opponent shipyards on the map."""
     opponent_shipyards = []
     for player_id, player in game.players.items():
-        if player_id != game.my_id:  # Exclude my shipyard
+        if player_id != game.my_id:
             opponent_shipyards.append(player.shipyard.position)
     return opponent_shipyards
 
@@ -64,12 +78,12 @@ def a_star(game_map, source, target):
         current = min(open_set, key=lambda pos: fScore.get(pos, float('inf')))
 
         if current == target:
-            # Reconstruct path
+
             path = []
             while current in came_from:
                 path.insert(0, current)
                 current = came_from[current]
-            return path  # Return the path to follow
+            return path  
 
         open_set.remove(current)
         closed_set.add(current)
@@ -78,7 +92,7 @@ def a_star(game_map, source, target):
             if neighbor in closed_set or game_map[neighbor].is_occupied:
                 continue
 
-            tentative_gScore = gScore[current] + game_map[neighbor].halite_amount / 10  # Example cost
+            tentative_gScore = gScore[current] + game_map[neighbor].halite_amount / 10 
 
             if neighbor not in open_set:
                 open_set.append(neighbor)
@@ -92,19 +106,33 @@ def a_star(game_map, source, target):
 
     return [] 
 
+normal_count = 0
+blocker_count = 0
+blocker_limit = 4 
+minimum_normals = 5 
+
+
 while True:
     game.update_frame()
     me = game.me
     game_map = game.game_map
 
-    normal_count = 0
-    blocker_count = 0
-    blocker_limit = 4 
-    minimum_normals = 5 
+    current_ships = {ship.id for ship in me.get_ships()}
+    
+    dead_ships = set(ship_stage.keys()) - current_ships
+    
+    for dead_ship in dead_ships:
+        state, role = ship_stage[dead_ship]
+        if role == BotClass.Blocker:
+            blocker_count -= 1
+        del ship_stage[dead_ship]
 
     opponent_shipyards = get_opponent_shipyards(game)
     logging.info(f"Opponent Shipyards: {opponent_shipyards}")
 
+    team_halite = calculate_team_halite(game)
+    for player_id, total in team_halite.items():
+        logging.info(f"Player {player_id} Total Halite: {total}")
 
     command_queue = []
 
@@ -117,6 +145,9 @@ while True:
             elif blocker_count < blocker_limit:
                 ship_stage[ship.id] = (BotState.SEARCH, BotClass.Blocker)
                 blocker_count += 1
+            else:
+                ship_stage[ship.id] = (BotState.MOVE_TO_TARGET, BotClass.Normal)
+                normal_count += 1
 
         state, role = ship_stage[ship.id]
 
@@ -159,11 +190,15 @@ while True:
                     ship_stage[ship.id] = (BotState.MOVE_TO_TARGET, role)
 
         elif role == BotClass.Blocker:
-
             if opponent_shipyards:
-                target_shipyard = opponent_shipyards[0]  
+                target_shipyard = opponent_shipyards[0] 
                 directions = [Direction.North, Direction.South, Direction.East, Direction.West]
-                blocker_target = target_shipyard.directional_offset(directions[blocker_count % 4])
+
+                blocker_index = list(ship_stage.keys()).index(ship.id) % 4
+                assigned_direction = directions[blocker_index]
+
+                blocker_target = target_shipyard.directional_offset(assigned_direction)
+                blocker_target = game_map.normalize(blocker_target) 
 
                 path = a_star(game_map, ship.position, blocker_target)
                 if path:
@@ -173,7 +208,7 @@ while True:
                     command_queue.append(ship.move(direction))
                 else:
                     command_queue.append(ship.stay_still())
-                    
+                            
     logging.info(f"Normal Bots: {normal_count}, Blocker Bots: {blocker_count}")
 
 

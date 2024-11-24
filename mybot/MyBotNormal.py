@@ -39,24 +39,20 @@ def heuristic(pos1, pos2):
     """Manhattan distance heuristic."""
     return abs(pos1.x - pos1.y) + abs(pos2.x - pos2.y)
 
-def get_top_halite_positions(game_map):
-    """Get the top 5 positions with the highest halite values."""
-    halite_positions = []
+def calculate_team_halite(game):
+    """Calculate the total halite for each team."""
+    team_halite = {}
 
-    for y in range(game_map.height):
-        for x in range(game_map.width):
-            position = Position(x, y)
-            halite_amount = game_map[position].halite_amount
-            halite_positions.append((halite_amount, position))
+    # Add halite carried by ships and dropoffs/shipyards
+    for player_id, player in game.players.items():
+        total_halite = player.halite_amount  # Halite stored by the player
+        # Add halite carried by ships
+        for ship in player.get_ships():
+            total_halite += ship.halite_amount
+        # Add halite in the map (for all players, not just the player's cells)
+        team_halite[player_id] = total_halite
 
-    # Sort positions by halite amount in descending order
-    halite_positions.sort(key=lambda item: item[0], reverse=True)
-
-    # Get the top 5 halite positions
-    top_halite_positions = halite_positions[:5]
-
-    return top_halite_positions
-
+    return team_halite
 def a_star(game_map, source, target):
     """A* pathfinding to navigate from source to target."""
     open_set = [source]
@@ -103,8 +99,9 @@ while True:
     me = game.me
     game_map = game.game_map
 
-    top_halite_positions = get_top_halite_positions(game_map)
-    logging.info(f"Top 5 Halite Positions: {top_halite_positions}")
+    team_halite = calculate_team_halite(game)
+    for player_id, total in team_halite.items():
+        logging.info(f"Player {player_id} Total Halite: {total}")
 
     command_queue = []
 
