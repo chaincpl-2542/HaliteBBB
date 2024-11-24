@@ -13,7 +13,7 @@ from hlt.positionals import Direction, Position
 
 """ <<<Game Begin>>> """
 game = hlt.Game()
-game.ready("BBB")
+game.ready("Normal")
 
 logging.info(f"Successfully created bot! My Player ID is {game.my_id}.")
 
